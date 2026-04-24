@@ -10,9 +10,10 @@ This is an **engineering exploration project** — not a production product. Key
 
 ## Commands
 
-These will be available once the project is bootstrapped. Typical setup:
+Run from the `backend/` directory:
 
 ```bash
+cd backend
 npm install          # install dependencies
 npm run build        # compile TypeScript
 npm test             # run all tests
@@ -22,31 +23,39 @@ npm run dev          # start dev server (WebSocket + HTTP)
 
 ## Architecture
 
-The system has two distinct layers with a clear boundary between them:
+The repo is split into two top-level packages:
 
-**Real-time layer** (`src/realtime/`) — synchronous, latency-sensitive
+```
+backend/    # standalone Node.js package (TypeScript)
+frontend/   # placeholder — not yet bootstrapped
+```
+
+The backend has two distinct layers with a clear boundary between them:
+
+**Real-time layer** (`backend/src/realtime/`) — synchronous, latency-sensitive
 - Manages WebSocket connections
 - Broadcasts state updates between clients immediately
 - Does not care about persistence or downstream processing
 
-**Event-driven layer** (`src/event-bus/`, `src/workers/`) — asynchronous, decoupled
+**Event-driven layer** (`backend/src/event-bus/`, `backend/src/workers/`) — asynchronous, decoupled
 - Receives domain events published by the real-time layer
 - Workers consume events independently (persistence, replay, analytics)
 - Never blocks the real-time path
 
-**Domain layer** (`src/domain/`) — pure logic, no I/O
+**Domain layer** (`backend/src/domain/`) — pure logic, no I/O
 - All state transformations happen here as pure functions
 - Central function: `applyEvent(state, event) => newState`
 - No dependencies on WebSocket or event-bus concerns
 
 ```
-src/
-  domain/      # pure functions: elements, events, state transformations
-  realtime/    # WebSocket handling and client broadcasting
-  event-bus/   # publish/subscribe system
-  workers/     # async event consumers
-tests/
-specs/         # spec documents before implementation
+backend/
+  src/
+    domain/      # pure functions: elements, events, state transformations
+    realtime/    # WebSocket handling and client broadcasting
+    event-bus/   # publish/subscribe system
+    workers/     # async event consumers
+  tests/
+  specs/         # spec documents before implementation
 ```
 
 ## Domain Model
