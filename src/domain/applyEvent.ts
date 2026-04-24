@@ -1,4 +1,4 @@
-import { DiagramState, DiagramEvent } from './types';
+import { DiagramState, DiagramEvent } from '@/domain/types';
 
 export function applyEvent(state: DiagramState, event: DiagramEvent): DiagramState {
   if (state.processedEventIds[event.id]) {
