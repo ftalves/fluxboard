@@ -193,3 +193,4 @@ This applies to **all** event types without exception.
 
 - Validation of coordinates, dimensions, or element type values
 - Referential integrity enforcement beyond arrow cleanup on element delete
+- Bounding the growth of `processedEventIds`. The map accumulates one entry per accepted event for the room's lifetime. Acceptable for MVP because rooms are in-memory and short-lived (destroyed shortly after the last client disconnects). A future spec may bound it via a ring buffer or a compaction pass.

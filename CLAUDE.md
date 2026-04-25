@@ -75,12 +75,16 @@ backend/
 { id: string; fromElementId: string; toElementId: string }
 ```
 
-**Events** (each includes `timestamp: number` and `userId: string`):
+**Events** (each includes `id: string`, `timestamp: number`, and `userId: string`):
 - `ElementCreated` — payload: full Element
 - `ElementMoved` — payload: `{ id, x, y }`
 - `ElementResized` — payload: `{ id, width, height }`
-- `ElementUpdated` — payload: `{ id, text }`
+- `ElementTextUpdated` — payload: `{ id, text }`
+- `ElementDeleted` — payload: `{ id }` (also removes any arrows referencing the element)
 - `ArrowCreated` — payload: full Arrow
+- `ArrowDeleted` — payload: `{ id }`
+
+The authoritative type definitions live in [`backend/src/domain/types.ts`](backend/src/domain/types.ts). The full set of behaviors and edge cases is specified in [`backend/specs/apply-event.md`](backend/specs/apply-event.md).
 
 ## Intentional Tradeoffs (do not change without discussion)
 
