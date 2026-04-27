@@ -105,6 +105,22 @@ The `uncaughtException` / `unhandledRejection` handlers are installed once, imme
 
 ---
 
+## Framework boundary
+
+The HTTP layer uses raw `node:http` rather than Express (or any other framework), per CLAUDE.md's "avoid heavy frameworks" stance and because `POST /rooms` is the only route. The design, however, **keeps the door open** to swap in Express (or Fastify, Hono, etc.) later if we add features that benefit from a framework — e.g. authenticated users, persistent rooms, multiple HTTP routes, or middleware-style cross-cutting concerns.
+
+**Portability invariant:** route logic must not import or reference Node-specific HTTP types. Specifically:
+
+- `handleHttpRequest` (in [`httpRoutes.ts`](../src/realtime/httpRoutes.ts)) takes a plain `HttpRequest` (method, url, headers, body-as-string) and returns a plain `HttpResponse` (status, headers, body-as-string). It does not see `IncomingMessage` or `ServerResponse`.
+- `validateSeed`, `parseClientMessage`, `Room`, `RoomRegistry`, and `EventBus` are framework-agnostic by construction.
+- The body is passed as a **string**, not a pre-parsed object. This keeps JSON-parse error handling local to the route (`400 bad_json`) and is what makes the route Express-swappable: with Express, we'd use `express.text({ type: 'application/json', limit: MAX_SEED_BYTES })` rather than `express.json()`.
+
+**Node-specific code is confined to `server.ts`:** body streaming with the `MAX_SEED_BYTES` cap, response writing, and the `upgrade` event handler. A future Express adoption replaces only these pieces; nothing else changes.
+
+**WebSocket is unaffected by the HTTP framework choice.** `ws.WebSocketServer({ noServer: true })` attaches directly to the underlying `http.Server` via `upgrade`, so it sits beside the HTTP router rather than under it. Express would not own the WS path even if adopted for HTTP.
+
+---
+
 ## Invariants
 
 - **`index.ts` is the only place modules are constructed.** No other file constructs an `EventBus`, a `RoomRegistry`, or starts an `http.Server`.
@@ -112,6 +128,7 @@ The `uncaughtException` / `unhandledRejection` handlers are installed once, imme
 - **Shutdown is graceful by default and bounded by a hard timeout.** No code path can keep the process alive past `10_000` ms after a signal.
 - **Single port for HTTP and WebSocket.** One `http.Server` instance, one `listen` call. The WS server attaches via `noServer: true`.
 - **No globals.** All shared instances are explicitly passed.
+- **Route logic is framework-agnostic.** `server.ts` is the only Node-HTTP-aware file; route handlers take plain request/response objects so the layer can be swapped to Express or another framework if future requirements warrant it.
 - **Fail fast on misconfig.** Bad env vars exit before any port is bound or any side effect occurs.
 
 ---
