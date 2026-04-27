@@ -58,6 +58,7 @@ Rules:
 4. Every key in `seed.arrows` is a non-empty string equal to the contained arrow's `id`.
 5. Every value in `seed.arrows` matches the `Arrow` shape: `id`, `fromElementId`, `toElementId` all non-empty strings.
 6. For every arrow, both `fromElementId` and `toElementId` exist as keys in `seed.elements`.
+7. For every arrow, `fromElementId !== toElementId` — arrows must connect two distinct elements. (Matches `applyEvent`'s runtime rejection of self-referencing `ArrowCreated`.)
 
 Coordinate values, sizes, and `text` length are not range-validated (consistent with `applyEvent`'s "no validation" stance). Negative or zero dimensions are accepted.
 

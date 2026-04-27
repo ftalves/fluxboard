@@ -571,7 +571,7 @@ describe('ArrowCreated', () => {
     expect(after.arrows['arrow-1'].toElementId).toBe('el-3');
   });
 
-  it('accepts a self-referencing arrow when the element exists', () => {
+  it('rejects a self-referencing arrow as a semantic no-op', () => {
     const state = applyEvent(emptyState(), {
       ...baseEvent,
       id: 'e1',
@@ -584,7 +584,11 @@ describe('ArrowCreated', () => {
       type: 'ArrowCreated',
       payload: makeArrow({ fromElementId: 'el-1', toElementId: 'el-1' }),
     });
-    expect(after.arrows['arrow-1']).toBeDefined();
+    // No arrow created.
+    expect(after.arrows['arrow-1']).toBeUndefined();
+    expect(after.arrows).toEqual({});
+    // But the event id is recorded so the rejection is durable across retries.
+    expect(after.processedEventIds['e2']).toBe(true);
   });
 
   it('does not affect elements', () => {

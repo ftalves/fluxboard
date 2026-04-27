@@ -94,17 +94,18 @@ describe('Room: construction', () => {
 
 describe('Room: snapshot', () => {
   it('returns the elements and arrows of the current state', () => {
-    const element = makeElement();
-    const arrow = makeArrow({ fromElementId: 'el-1', toElementId: 'el-1' });
+    const elA = makeElement({ id: 'el-1' });
+    const elB = makeElement({ id: 'el-2' });
+    const arrow = makeArrow({ fromElementId: 'el-1', toElementId: 'el-2' });
     const state: DiagramState = {
-      elements: { 'el-1': element },
+      elements: { 'el-1': elA, 'el-2': elB },
       arrows: { 'arrow-1': arrow },
       processedEventIds: {},
     };
     const room = makeRoom({ state });
 
     expect(room.snapshot()).toEqual({
-      elements: { 'el-1': element },
+      elements: { 'el-1': elA, 'el-2': elB },
       arrows: { 'arrow-1': arrow },
     });
   });
