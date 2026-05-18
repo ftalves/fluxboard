@@ -92,8 +92,6 @@ const makeFakeResponse = () => ({
   setHeader: jest.fn(),
 });
 
-type FakeResponse = ReturnType<typeof makeFakeResponse>;
-
 const makeFakeWss = (): WsServer & { handleUpgrade: jest.Mock } => ({
   handleUpgrade: jest.fn(),
 });
@@ -332,7 +330,12 @@ describe('createUpgradeHandler: room lookup', () => {
 
     handler(req, socket, Buffer.alloc(0));
 
-    expect(wss.handleUpgrade).toHaveBeenCalledWith(req, socket, expect.any(Buffer), expect.any(Function));
+    expect(wss.handleUpgrade).toHaveBeenCalledWith(
+      req,
+      socket,
+      expect.any(Buffer),
+      expect.any(Function),
+    );
   });
 
   it('calls handleConnection after a successful upgrade', () => {
@@ -401,7 +404,12 @@ describe('createUpgradeHandler: SocketHandle adapter', () => {
     (registry.getRoom as jest.Mock).mockReturnValue({ id: 'r' });
     wss.handleUpgrade.mockImplementation((_req, _sock, _head, cb) => cb(fakeWsSocket));
 
-    const handler = createUpgradeHandler({ wss, registry, bus: makeFakeBus(), config: makeConfig() });
+    const handler = createUpgradeHandler({
+      wss,
+      registry,
+      bus: makeFakeBus(),
+      config: makeConfig(),
+    });
     handler(
       { url: '/ws/r', headers: {} } as unknown as http.IncomingMessage,
       makeFakeSocket(),
@@ -491,8 +499,7 @@ describe('readBody: rejection details', () => {
     // current readBody skeleton has not yet attached one. Real impl will
     // attach its own; both listeners fire harmlessly.
     r.on('error', () => {});
-    const p = (async () =>
-      readBody(r as unknown as http.IncomingMessage, 1024))();
+    const p = (async () => readBody(r as unknown as http.IncomingMessage, 1024))();
     setImmediate(() => r.emit('error', new Error('stream broke')));
     await expect(p).rejects.toBeDefined();
   });
