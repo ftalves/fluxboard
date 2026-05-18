@@ -1,0 +1,478 @@
+import { Readable } from 'node:stream';
+import type http from 'node:http';
+import type net from 'node:net';
+import {
+  readBody,
+  writeHttpResponse,
+  createRequestHandler,
+  createUpgradeHandler,
+  WsServer,
+  WsSocket,
+} from '@/server';
+import type { HttpRequest, HttpResponse } from '@/realtime/httpRoutes';
+import type { RoomRegistry } from '@/realtime/rooms/roomRegistry';
+import type { EventBus } from '@/event-bus/bus';
+import type { Config } from '@/config';
+
+// Mock handleHttpRequest and handleConnection so server tests don't depend on
+// their implementations — server.ts is only tested for its Node-specific glue.
+jest.mock('@/realtime/httpRoutes', () => ({
+  handleHttpRequest: jest.fn(),
+}));
+jest.mock('@/realtime/connection', () => ({
+  handleConnection: jest.fn(),
+}));
+
+import { handleHttpRequest } from '@/realtime/httpRoutes';
+import { handleConnection } from '@/realtime/connection';
+
+const mockHandleHttpRequest = handleHttpRequest as jest.MockedFunction<typeof handleHttpRequest>;
+const mockHandleConnection = handleConnection as jest.MockedFunction<typeof handleConnection>;
+
+// ─── Fakes / fixtures ─────────────────────────────────────────────────────────
+
+const makeConfig = (overrides: Partial<Config> = {}): Config => ({
+  PORT: 8080,
+  GRACE_PERIOD_MS: 30_000,
+  ROOM_ID_LENGTH: 8,
+  JOIN_TIMEOUT_MS: 5_000,
+  WS_HEARTBEAT_MS: 30_000,
+  MAX_SEED_BYTES: 1_048_576,
+  MAX_WS_MESSAGE_BYTES: 262_144,
+  ...overrides,
+});
+
+const makeFakeRegistry = (): RoomRegistry =>
+  ({
+    createRoom: jest.fn(),
+    getRoom: jest.fn(),
+    destroyRoom: jest.fn(),
+    size: jest.fn(),
+    forEachRoom: jest.fn(),
+  }) as unknown as RoomRegistry;
+
+const makeFakeBus = (): EventBus =>
+  ({
+    publish: jest.fn(),
+    subscribe: jest.fn(),
+    close: jest.fn(),
+  }) as unknown as EventBus;
+
+/** Builds a Readable that emits `chunks` and then ends. */
+const makeReadable = (chunks: string[]): Readable => {
+  const r = new Readable({ read() {} });
+  setImmediate(() => {
+    chunks.forEach((c) => r.push(c));
+    r.push(null);
+  });
+  return r;
+};
+
+/**
+ * Builds a minimal IncomingMessage-shaped object for request handler tests.
+ * Casts through unknown — IncomingMessage is a Readable, so the Readable
+ * body streaming works; the extra properties satisfy the handler's shape check.
+ */
+const makeRequest = (
+  chunks: string[],
+  overrides: { method?: string; url?: string; headers?: Record<string, string> } = {},
+): http.IncomingMessage =>
+  Object.assign(makeReadable(chunks), {
+    method: 'POST',
+    url: '/rooms',
+    headers: { 'content-type': 'application/json' },
+    ...overrides,
+  }) as unknown as http.IncomingMessage;
+
+/** Fake http.ServerResponse — captures writes for assertion. */
+const makeFakeResponse = () => ({
+  writeHead: jest.fn(),
+  write: jest.fn(),
+  end: jest.fn(),
+  setHeader: jest.fn(),
+});
+
+type FakeResponse = ReturnType<typeof makeFakeResponse>;
+
+const makeFakeWss = (): WsServer & { handleUpgrade: jest.Mock } => ({
+  handleUpgrade: jest.fn(),
+});
+
+const makeFakeSocket = (): net.Socket & { write: jest.Mock; destroy: jest.Mock } =>
+  ({
+    write: jest.fn(),
+    destroy: jest.fn(),
+  }) as unknown as net.Socket & { write: jest.Mock; destroy: jest.Mock };
+
+beforeEach(() => {
+  mockHandleHttpRequest.mockReset();
+  mockHandleConnection.mockReset();
+});
+
+// ─── readBody ─────────────────────────────────────────────────────────────────
+
+describe('readBody: successful streaming', () => {
+  it('resolves with the concatenated body string', async () => {
+    const req = makeReadable(['hello', ' ', 'world']) as unknown as http.IncomingMessage;
+    const body = await readBody(req, 1024);
+    expect(body).toBe('hello world');
+  });
+
+  it('resolves with an empty string for a zero-byte body', async () => {
+    const req = makeReadable([]) as unknown as http.IncomingMessage;
+    const body = await readBody(req, 1024);
+    expect(body).toBe('');
+  });
+
+  it('accepts a body exactly at the limit (byte count equals maxBytes)', async () => {
+    const payload = 'a'.repeat(100);
+    const req = makeReadable([payload]) as unknown as http.IncomingMessage;
+    const body = await readBody(req, 100);
+    expect(body).toBe(payload);
+  });
+});
+
+describe('readBody: size cap', () => {
+  it('rejects when body exceeds maxBytes', async () => {
+    const payload = 'a'.repeat(101);
+    const req = makeReadable([payload]) as unknown as http.IncomingMessage;
+    await expect(readBody(req, 100)).rejects.toBeDefined();
+  });
+
+  it('rejects even when overflow arrives in a later chunk', async () => {
+    // First chunk fits; second chunk tips over the limit.
+    const req = makeReadable(['a'.repeat(50), 'b'.repeat(60)]) as unknown as http.IncomingMessage;
+    await expect(readBody(req, 100)).rejects.toBeDefined();
+  });
+});
+
+// ─── writeHttpResponse ────────────────────────────────────────────────────────
+
+describe('writeHttpResponse', () => {
+  it('writes the status code', () => {
+    const res = makeFakeResponse();
+    writeHttpResponse(res as unknown as http.ServerResponse, { status: 201, body: '' });
+    expect(res.writeHead).toHaveBeenCalledWith(201, expect.anything());
+  });
+
+  it('writes response headers', () => {
+    const res = makeFakeResponse();
+    writeHttpResponse(res as unknown as http.ServerResponse, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    const [, headers] = res.writeHead.mock.calls[0];
+    expect(headers).toMatchObject({ 'content-type': 'application/json' });
+  });
+
+  it('writes the body string and ends the response', () => {
+    const res = makeFakeResponse();
+    writeHttpResponse(res as unknown as http.ServerResponse, {
+      status: 201,
+      body: '{"roomId":"abc"}',
+    });
+    // Some implementations call res.end(body), others res.write(body) + res.end().
+    const allWritten = [
+      ...res.write.mock.calls.map((c: unknown[]) => c[0]),
+      ...res.end.mock.calls.map((c: unknown[]) => c[0]),
+    ]
+      .filter(Boolean)
+      .join('');
+    expect(allWritten).toContain('abc');
+  });
+
+  it('calls res.end even when body is absent', () => {
+    const res = makeFakeResponse();
+    writeHttpResponse(res as unknown as http.ServerResponse, { status: 404 });
+    expect(res.end).toHaveBeenCalled();
+  });
+});
+
+// ─── createRequestHandler ─────────────────────────────────────────────────────
+
+describe('createRequestHandler: body streaming integration', () => {
+  it('passes the streamed body string to handleHttpRequest', async () => {
+    const registry = makeFakeRegistry();
+    const cfg = makeConfig({ MAX_SEED_BYTES: 1_048_576 });
+    mockHandleHttpRequest.mockReturnValue({ status: 201, body: '{"roomId":"r"}' });
+
+    const handler = createRequestHandler({ registry, config: cfg });
+    const req = makeRequest([JSON.stringify({ seed: { elements: {}, arrows: {} } })]);
+    const res = makeFakeResponse();
+    await handler(req, res as unknown as http.ServerResponse);
+
+    const [calledReq] = mockHandleHttpRequest.mock.calls[0] as [HttpRequest, unknown];
+    expect(typeof calledReq.body).toBe('string');
+  });
+
+  it('returns 413 without calling handleHttpRequest when body exceeds MAX_SEED_BYTES', async () => {
+    const registry = makeFakeRegistry();
+    const cfg = makeConfig({ MAX_SEED_BYTES: 10 });
+
+    const handler = createRequestHandler({ registry, config: cfg });
+    const req = makeRequest(['a'.repeat(11)], { headers: {} });
+    const res = makeFakeResponse();
+    await handler(req, res as unknown as http.ServerResponse);
+
+    // 413 must be written
+    expect(res.writeHead).toHaveBeenCalledWith(413, expect.anything());
+    // handleHttpRequest must NOT have been called
+    expect(mockHandleHttpRequest).not.toHaveBeenCalled();
+  });
+
+  it('forwards method, url, and headers from IncomingMessage', async () => {
+    const registry = makeFakeRegistry();
+    const cfg = makeConfig();
+    mockHandleHttpRequest.mockReturnValue({ status: 201, body: '{"roomId":"r"}' });
+
+    const handler = createRequestHandler({ registry, config: cfg });
+    const req = makeRequest(['{}'], { headers: { 'content-type': 'application/json' } });
+    await handler(req, makeFakeResponse() as unknown as http.ServerResponse);
+
+    const [calledReq] = mockHandleHttpRequest.mock.calls[0] as [HttpRequest, unknown];
+    expect(calledReq.method).toBe('POST');
+    expect(calledReq.url).toBe('/rooms');
+    expect(calledReq.headers['content-type']).toBe('application/json');
+  });
+
+  it('writes the HttpResponse returned by handleHttpRequest', async () => {
+    const registry = makeFakeRegistry();
+    const cfg = makeConfig();
+    mockHandleHttpRequest.mockReturnValue({
+      status: 201,
+      headers: { 'content-type': 'application/json' },
+      body: '{"roomId":"xyz"}',
+    } satisfies HttpResponse);
+
+    const handler = createRequestHandler({ registry, config: cfg });
+    const req = makeRequest(['{}'], { headers: {} });
+    const res = makeFakeResponse();
+    await handler(req, res as unknown as http.ServerResponse);
+
+    expect(res.writeHead).toHaveBeenCalledWith(201, expect.anything());
+  });
+});
+
+// ─── createUpgradeHandler ────────────────────────────────────────────────────
+
+describe('createUpgradeHandler: roomId parsing', () => {
+  it('returns 404 for a URL that does not match /ws/:roomId', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    const bus = makeFakeBus();
+
+    const handler = createUpgradeHandler({ wss, registry, bus, config: makeConfig() });
+    const req = { url: '/not-ws/whatever', headers: {} } as unknown as http.IncomingMessage;
+    const socket = makeFakeSocket();
+
+    handler(req, socket, Buffer.alloc(0));
+
+    expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('404'));
+    expect(socket.destroy).toHaveBeenCalled();
+    expect(wss.handleUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when /ws/ is given with no roomId segment', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    const bus = makeFakeBus();
+
+    const handler = createUpgradeHandler({ wss, registry, bus, config: makeConfig() });
+    const req = { url: '/ws/', headers: {} } as unknown as http.IncomingMessage;
+    const socket = makeFakeSocket();
+
+    handler(req, socket, Buffer.alloc(0));
+
+    expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('404'));
+    expect(socket.destroy).toHaveBeenCalled();
+  });
+});
+
+describe('createUpgradeHandler: room lookup', () => {
+  it('returns 404 to the raw socket when the room does not exist', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue(undefined);
+    const bus = makeFakeBus();
+
+    const handler = createUpgradeHandler({ wss, registry, bus, config: makeConfig() });
+    const req = { url: '/ws/abc123', headers: {} } as unknown as http.IncomingMessage;
+    const socket = makeFakeSocket();
+
+    handler(req, socket, Buffer.alloc(0));
+
+    expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('404'));
+    expect(socket.destroy).toHaveBeenCalled();
+    expect(wss.handleUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('looks up the roomId parsed from the URL', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue(undefined);
+    const bus = makeFakeBus();
+
+    const handler = createUpgradeHandler({ wss, registry, bus, config: makeConfig() });
+    const req = { url: '/ws/myRoom', headers: {} } as unknown as http.IncomingMessage;
+    handler(req, makeFakeSocket(), Buffer.alloc(0));
+
+    expect(registry.getRoom).toHaveBeenCalledWith('myRoom');
+  });
+
+  it('calls wss.handleUpgrade when the room exists', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    const fakeRoom = { id: 'room1' };
+    (registry.getRoom as jest.Mock).mockReturnValue(fakeRoom);
+    const bus = makeFakeBus();
+
+    const handler = createUpgradeHandler({ wss, registry, bus, config: makeConfig() });
+    const req = { url: '/ws/room1', headers: {} } as unknown as http.IncomingMessage;
+    const socket = makeFakeSocket();
+
+    handler(req, socket, Buffer.alloc(0));
+
+    expect(wss.handleUpgrade).toHaveBeenCalledWith(req, socket, expect.any(Buffer), expect.any(Function));
+  });
+
+  it('calls handleConnection after a successful upgrade', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    const fakeRoom = { id: 'room1' };
+    (registry.getRoom as jest.Mock).mockReturnValue(fakeRoom);
+    const bus = makeFakeBus();
+
+    // Simulate wss.handleUpgrade calling back immediately with a fake ws socket.
+    const fakeWsSocket: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    wss.handleUpgrade.mockImplementation((_req, _sock, _head, cb) => cb(fakeWsSocket));
+
+    const handler = createUpgradeHandler({ wss, registry, bus, config: makeConfig() });
+    const req = { url: '/ws/room1', headers: {} } as unknown as http.IncomingMessage;
+    handler(req, makeFakeSocket(), Buffer.alloc(0));
+
+    expect(mockHandleConnection).toHaveBeenCalledTimes(1);
+    // Called with a SocketHandle adapter and a ConnectionContext containing the room.
+    const [, ctx] = mockHandleConnection.mock.calls[0] as [unknown, { room: unknown }];
+    expect(ctx.room).toBe(fakeRoom);
+  });
+
+  it('passes config.joinTimeoutMs and config.wsHeartbeatMs in the ConnectionContext', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue({ id: 'r' });
+    const bus = makeFakeBus();
+    const cfg = makeConfig({ JOIN_TIMEOUT_MS: 3_000, WS_HEARTBEAT_MS: 15_000 });
+
+    const fakeWsSocket: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    wss.handleUpgrade.mockImplementation((_req, _sock, _head, cb) => cb(fakeWsSocket));
+
+    const handler = createUpgradeHandler({ wss, registry, bus, config: cfg });
+    handler(
+      { url: '/ws/r', headers: {} } as unknown as http.IncomingMessage,
+      makeFakeSocket(),
+      Buffer.alloc(0),
+    );
+
+    const [, ctx] = mockHandleConnection.mock.calls[0] as [
+      unknown,
+      { config: { joinTimeoutMs: number; wsHeartbeatMs: number } },
+    ];
+    expect(ctx.config.joinTimeoutMs).toBe(3_000);
+    expect(ctx.config.wsHeartbeatMs).toBe(15_000);
+  });
+});
+
+describe('createUpgradeHandler: SocketHandle adapter', () => {
+  const setupWithFakeWs = (fakeWsSocket: WsSocket) => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue({ id: 'r' });
+    wss.handleUpgrade.mockImplementation((_req, _sock, _head, cb) => cb(fakeWsSocket));
+
+    const handler = createUpgradeHandler({ wss, registry, bus: makeFakeBus(), config: makeConfig() });
+    handler(
+      { url: '/ws/r', headers: {} } as unknown as http.IncomingMessage,
+      makeFakeSocket(),
+      Buffer.alloc(0),
+    );
+
+    const [socketHandle] = mockHandleConnection.mock.calls[0] as [
+      {
+        send: (d: string) => void;
+        close: (code: number, reason?: string) => void;
+        terminate: () => void;
+        ping: () => void;
+        onMessage: (h: (d: string) => void) => void;
+        onPong: (h: () => void) => void;
+        onClose: (h: () => void) => void;
+      },
+      unknown,
+    ];
+    return { socketHandle, fakeWsSocket };
+  };
+
+  it('handle.send(data) calls ws.send(data)', () => {
+    const ws: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const { socketHandle } = setupWithFakeWs(ws);
+    socketHandle.send('hello');
+    expect(ws.send).toHaveBeenCalledWith('hello');
+  });
+
+  it('handle.close(code, reason) calls ws.close(code, reason)', () => {
+    const ws: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const { socketHandle } = setupWithFakeWs(ws);
+    socketHandle.close(1001, 'bye');
+    expect(ws.close).toHaveBeenCalledWith(1001, 'bye');
+  });
+
+  it('handle.ping() calls ws.ping()', () => {
+    const ws: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const { socketHandle } = setupWithFakeWs(ws);
+    socketHandle.ping();
+    expect(ws.ping).toHaveBeenCalled();
+  });
+
+  it('handle.onMessage(handler) subscribes to ws "message" events', () => {
+    const ws: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const { socketHandle } = setupWithFakeWs(ws);
+    const h = jest.fn();
+    socketHandle.onMessage(h);
+    expect(ws.on).toHaveBeenCalledWith('message', expect.any(Function));
+  });
+});
