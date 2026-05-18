@@ -707,4 +707,162 @@ describe('unknown event type', () => {
     expect(after.elements).toEqual({});
     expect(after.arrows).toEqual({});
   });
+
+  it('still records the event id in processedEventIds for an unknown type', () => {
+    const state = emptyState();
+    const unknownEvent = {
+      ...baseEvent,
+      id: 'evt-future',
+      type: 'SomeFutureEvent',
+      payload: {},
+    } as unknown as DiagramEvent;
+    const after = applyEvent(state, unknownEvent);
+    expect(after.processedEventIds['evt-future']).toBe(true);
+  });
+});
+
+// ─── Input non-mutation ──────────────────────────────────────────────────────
+// General Invariants (apply-event.md §"General Invariants"): applyEvent must
+// not mutate `state` OR `event`. State-mutation is covered per-type above;
+// these tests pin the same guarantee for the event argument.
+
+describe('applyEvent: does not mutate the input event', () => {
+  it('does not mutate ElementCreated event or its payload', () => {
+    const event: DiagramEvent = {
+      ...baseEvent,
+      id: 'evt-1',
+      type: 'ElementCreated',
+      payload: makeElement(),
+    };
+    const snapshot = JSON.parse(JSON.stringify(event));
+    applyEvent(emptyState(), event);
+    expect(event).toEqual(snapshot);
+  });
+
+  it('does not mutate ElementMoved event on a no-op (unknown id)', () => {
+    const event: DiagramEvent = {
+      ...baseEvent,
+      id: 'evt-1',
+      type: 'ElementMoved',
+      payload: { id: 'ghost', x: 1, y: 2 },
+    };
+    const snapshot = JSON.parse(JSON.stringify(event));
+    applyEvent(emptyState(), event);
+    expect(event).toEqual(snapshot);
+  });
+
+  it('does not mutate ArrowCreated event when both endpoints are missing', () => {
+    const event: DiagramEvent = {
+      ...baseEvent,
+      id: 'evt-1',
+      type: 'ArrowCreated',
+      payload: makeArrow({ fromElementId: 'ghost-a', toElementId: 'ghost-b' }),
+    };
+    const snapshot = JSON.parse(JSON.stringify(event));
+    applyEvent(emptyState(), event);
+    expect(event).toEqual(snapshot);
+  });
+
+  it('does not mutate an already-processed event (idempotent fast-path)', () => {
+    const event: DiagramEvent = {
+      ...baseEvent,
+      id: 'evt-1',
+      type: 'ElementCreated',
+      payload: makeElement(),
+    };
+    const after = applyEvent(emptyState(), event);
+    const snapshot = JSON.parse(JSON.stringify(event));
+    applyEvent(after, event); // event.id is in processedEventIds — early return
+    expect(event).toEqual(snapshot);
+  });
+});
+
+// ─── Rejected-path commit of processedEventIds ───────────────────────────────
+// realtime-broadcast.md §"Event flow" step 4 relies on rejected events being
+// recorded in processedEventIds so a retry of the same event.id later
+// classifies as `duplicate` (not re-evaluated). Pin this for every event
+// type's semantic-rejection path.
+
+describe('applyEvent: rejected paths still record processedEventIds', () => {
+  it('ElementMoved on unknown id records the event id', () => {
+    const after = applyEvent(emptyState(), {
+      ...baseEvent,
+      id: 'evt-moved-ghost',
+      type: 'ElementMoved',
+      payload: { id: 'ghost', x: 1, y: 2 },
+    });
+    expect(after.processedEventIds['evt-moved-ghost']).toBe(true);
+  });
+
+  it('ElementResized on unknown id records the event id', () => {
+    const after = applyEvent(emptyState(), {
+      ...baseEvent,
+      id: 'evt-resized-ghost',
+      type: 'ElementResized',
+      payload: { id: 'ghost', width: 1, height: 1 },
+    });
+    expect(after.processedEventIds['evt-resized-ghost']).toBe(true);
+  });
+
+  it('ElementTextUpdated on unknown id records the event id', () => {
+    const after = applyEvent(emptyState(), {
+      ...baseEvent,
+      id: 'evt-text-ghost',
+      type: 'ElementTextUpdated',
+      payload: { id: 'ghost', text: 'hi' },
+    });
+    expect(after.processedEventIds['evt-text-ghost']).toBe(true);
+  });
+
+  it('ElementDeleted on unknown id records the event id', () => {
+    const after = applyEvent(emptyState(), {
+      ...baseEvent,
+      id: 'evt-del-ghost',
+      type: 'ElementDeleted',
+      payload: { id: 'ghost' },
+    });
+    expect(after.processedEventIds['evt-del-ghost']).toBe(true);
+  });
+
+  it('ArrowCreated with a missing fromElementId records the event id', () => {
+    const state = applyEvent(emptyState(), {
+      ...baseEvent,
+      id: 'seed',
+      type: 'ElementCreated',
+      payload: makeElement({ id: 'el-2' }),
+    });
+    const after = applyEvent(state, {
+      ...baseEvent,
+      id: 'evt-arr-missing-from',
+      type: 'ArrowCreated',
+      payload: makeArrow({ fromElementId: 'ghost', toElementId: 'el-2' }),
+    });
+    expect(after.processedEventIds['evt-arr-missing-from']).toBe(true);
+  });
+
+  it('ArrowCreated with a missing toElementId records the event id', () => {
+    const state = applyEvent(emptyState(), {
+      ...baseEvent,
+      id: 'seed',
+      type: 'ElementCreated',
+      payload: makeElement({ id: 'el-1' }),
+    });
+    const after = applyEvent(state, {
+      ...baseEvent,
+      id: 'evt-arr-missing-to',
+      type: 'ArrowCreated',
+      payload: makeArrow({ fromElementId: 'el-1', toElementId: 'ghost' }),
+    });
+    expect(after.processedEventIds['evt-arr-missing-to']).toBe(true);
+  });
+
+  it('ArrowDeleted on unknown id records the event id', () => {
+    const after = applyEvent(emptyState(), {
+      ...baseEvent,
+      id: 'evt-arr-del-ghost',
+      type: 'ArrowDeleted',
+      payload: { id: 'ghost' },
+    });
+    expect(after.processedEventIds['evt-arr-del-ghost']).toBe(true);
+  });
 });

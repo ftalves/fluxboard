@@ -27,14 +27,17 @@ export interface ServerHandle {
  *  4. Build HTTP server (request handler delegates to handleHttpRequest)
  *  5. Attach WebSocket server via noServer upgrade listener
  *  6. Start listening on config.PORT
+ *  7. After listen success, install SIGINT/SIGTERM listeners on `process`
+ *     that invoke the returned ServerHandle's `shutdown()`.
  *
  * Returns a handle whose `shutdown()` executes the graceful-shutdown
  * sequence (stop accepting → destroy rooms → unsubscribe workers →
  * close bus → resolve; hard-timeout at 10 s).
  *
- * Signal handlers (SIGINT, SIGTERM) are installed after listen succeeds
- * and call shutdown(); they are NOT installed by boot() itself so that
- * tests can drive shutdown directly without emitting signals.
+ * Signal handlers are installed by boot() itself (not by the module-level
+ * entry-point IIFE) so that they exist only when the server is actually
+ * listening, and so tests can drive the same shutdown path via
+ * `process.emit('SIGINT', ...)` against a fake-backed boot.
  */
 export async function boot(_cfg: Config): Promise<ServerHandle> {
   process.on('uncaughtException', (err) => {
@@ -53,34 +56,13 @@ export async function boot(_cfg: Config): Promise<ServerHandle> {
 
 if (require.main === module) {
   void (async () => {
-    let handle: ServerHandle;
     try {
-      handle = await boot(defaultConfig);
+      await boot(defaultConfig);
+      console.log('[server] listening on port', defaultConfig.PORT);
     } catch (err) {
       console.error('[boot] fatal:', err);
       process.exit(1);
     }
-
-    let sigCount = 0;
-    const onSignal = (sig: string) => {
-      sigCount++;
-      if (sigCount === 1) {
-        console.log(`[server] received ${sig}, shutting down`);
-        handle.shutdown().catch((err) => {
-          console.error('[server] shutdown error:', err);
-          process.exit(1);
-        });
-      } else if (sigCount === 2) {
-        console.log(`[server] shutdown already in progress (${sig} ignored)`);
-      } else {
-        process.exit(1);
-      }
-    };
-
-    process.on('SIGINT', () => onSignal('SIGINT'));
-    process.on('SIGTERM', () => onSignal('SIGTERM'));
-
-    console.log('[server] listening on port', defaultConfig.PORT);
   })();
 }
 

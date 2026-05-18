@@ -458,3 +458,169 @@ describe('boot: listen failure', () => {
     await expect(boot(makeConfig())).rejects.toThrow('EADDRINUSE');
   });
 });
+
+// ─── WebSocketServer construction ─────────────────────────────────────────────
+
+describe('boot: WebSocketServer construction', () => {
+  it('constructs the WebSocketServer with noServer: true', async () => {
+    const { WebSocketServer } = jest.requireMock('ws') as { WebSocketServer: jest.Mock };
+    await safeBoot();
+    expect(WebSocketServer).toHaveBeenCalledWith(
+      expect.objectContaining({ noServer: true }),
+    );
+  });
+
+  it('passes config.MAX_WS_MESSAGE_BYTES as maxPayload', async () => {
+    const { WebSocketServer } = jest.requireMock('ws') as { WebSocketServer: jest.Mock };
+    const cfg = makeConfig({ MAX_WS_MESSAGE_BYTES: 12_345 });
+    await safeBoot(cfg);
+    expect(WebSocketServer).toHaveBeenCalledWith(
+      expect.objectContaining({ maxPayload: 12_345 }),
+    );
+  });
+});
+
+// ─── Factory wiring ───────────────────────────────────────────────────────────
+
+describe('boot: factory wiring', () => {
+  it('calls createRequestHandler with { registry, config }', async () => {
+    const { createRequestHandler } = jest.requireMock('@/server') as {
+      createRequestHandler: jest.Mock;
+    };
+    const cfg = makeConfig();
+    await safeBoot(cfg);
+    expect(createRequestHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ registry: mockRegistryInstance, config: cfg }),
+    );
+  });
+
+  it('calls createUpgradeHandler with { wss, registry, bus, config }', async () => {
+    const { createUpgradeHandler } = jest.requireMock('@/server') as {
+      createUpgradeHandler: jest.Mock;
+    };
+    const cfg = makeConfig();
+    await safeBoot(cfg);
+    expect(createUpgradeHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registry: mockRegistryInstance,
+        bus: mockBusInstance,
+        config: cfg,
+      }),
+    );
+  });
+});
+
+// ─── boot return value ────────────────────────────────────────────────────────
+
+describe('boot: return value', () => {
+  it('resolves with a ServerHandle exposing shutdown()', async () => {
+    const handle = await safeBoot();
+    expect(handle).toBeDefined();
+    expect(typeof handle?.shutdown).toBe('function');
+  });
+});
+
+// ─── Process exception handlers: behavior on emit ─────────────────────────────
+
+describe('process exception handlers: behavior on emit', () => {
+  it('uncaughtException listener calls process.exit(1)', async () => {
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await safeBoot();
+      process.emit('uncaughtException', new Error('boom'));
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+
+  it('unhandledRejection listener calls process.exit(1)', async () => {
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await safeBoot();
+      process.emit('unhandledRejection', new Error('boom'), Promise.resolve());
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+});
+
+// ─── Shutdown ordering ────────────────────────────────────────────────────────
+
+describe('shutdown: ordering', () => {
+  it('calls httpServer.close before destroying any room', async () => {
+    const order: string[] = [];
+    mockHttpServer.close.mockImplementation((cb: () => void) => {
+      order.push('httpClose');
+      if (cb) cb();
+    });
+    mockRegistryInstance.forEachRoom.mockImplementation((fn: (r: { id: string }) => void) => {
+      fn({ id: 'r1' });
+    });
+    mockRegistryInstance.destroyRoom.mockImplementation(() => {
+      order.push('destroyRoom');
+    });
+
+    const handle = await safeBoot();
+    if (!handle) return;
+    await handle.shutdown();
+
+    const closeIdx = order.indexOf('httpClose');
+    const destroyIdx = order.indexOf('destroyRoom');
+    expect(closeIdx).toBeGreaterThanOrEqual(0);
+    expect(destroyIdx).toBeGreaterThan(closeIdx);
+  });
+
+  it('destroys rooms before unsubscribing workers', async () => {
+    const order: string[] = [];
+    mockRegistryInstance.forEachRoom.mockImplementation((fn: (r: { id: string }) => void) => {
+      fn({ id: 'r1' });
+    });
+    mockRegistryInstance.destroyRoom.mockImplementation(() => order.push('destroyRoom'));
+    mockUnsub1.mockImplementation(() => order.push('unsub1'));
+    mockUnsub2.mockImplementation(() => order.push('unsub2'));
+
+    const handle = await safeBoot();
+    if (!handle) return;
+    await handle.shutdown();
+
+    const destroyIdx = order.indexOf('destroyRoom');
+    const unsubIdx = order.indexOf('unsub1');
+    expect(destroyIdx).toBeGreaterThanOrEqual(0);
+    expect(unsubIdx).toBeGreaterThan(destroyIdx);
+  });
+});
+
+// ─── listen-failure cleanup ───────────────────────────────────────────────────
+
+describe('boot: listen failure cleanup', () => {
+  const triggerListenError = (err: Error = new Error('EADDRINUSE')) => {
+    mockHttpServer.listen.mockImplementation((_port: number, _cb: () => void) => {
+      setImmediate(() => {
+        const errorHandler = (mockHttpServer.on as jest.Mock).mock.calls.find(
+          ([ev]: [string]) => ev === 'error',
+        )?.[1] as ((e: Error) => void) | undefined;
+        errorHandler?.(err);
+      });
+      return mockHttpServer;
+    });
+  };
+
+  it('closes the bus when listen fails', async () => {
+    triggerListenError();
+    await expect(boot(makeConfig())).rejects.toThrow();
+    expect(mockBusInstance.close).toHaveBeenCalled();
+  });
+
+  it('unsubscribes workers when listen fails', async () => {
+    triggerListenError();
+    await expect(boot(makeConfig())).rejects.toThrow();
+    expect(mockUnsub1).toHaveBeenCalled();
+    expect(mockUnsub2).toHaveBeenCalled();
+  });
+});

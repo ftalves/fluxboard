@@ -476,3 +476,196 @@ describe('createUpgradeHandler: SocketHandle adapter', () => {
     expect(ws.on).toHaveBeenCalledWith('message', expect.any(Function));
   });
 });
+
+// ─── readBody: rejection shape & stream error ────────────────────────────────
+
+describe('readBody: rejection details', () => {
+  it('rejects with { tooLarge: true } when body exceeds maxBytes', async () => {
+    const req = makeReadable(['a'.repeat(101)]) as unknown as http.IncomingMessage;
+    await expect(readBody(req, 100)).rejects.toMatchObject({ tooLarge: true });
+  });
+
+  it("rejects when the underlying stream emits 'error'", async () => {
+    const r = new Readable({ read() {} });
+    // Defensive noop error listener: prevents Node from crashing if the
+    // current readBody skeleton has not yet attached one. Real impl will
+    // attach its own; both listeners fire harmlessly.
+    r.on('error', () => {});
+    const p = (async () =>
+      readBody(r as unknown as http.IncomingMessage, 1024))();
+    setImmediate(() => r.emit('error', new Error('stream broke')));
+    await expect(p).rejects.toBeDefined();
+  });
+});
+
+// ─── writeHttpResponse: optional headers ─────────────────────────────────────
+
+describe('writeHttpResponse: optional headers', () => {
+  it('writes status and ends even when headers field is absent', () => {
+    const res = makeFakeResponse();
+    writeHttpResponse(res as unknown as http.ServerResponse, { status: 204 });
+    expect(res.writeHead).toHaveBeenCalled();
+    const [status] = res.writeHead.mock.calls[0];
+    expect(status).toBe(204);
+    expect(res.end).toHaveBeenCalled();
+  });
+});
+
+// ─── SocketHandle adapter: remaining surface ─────────────────────────────────
+
+describe('createUpgradeHandler: SocketHandle adapter (remaining surface)', () => {
+  const drive = (ws: WsSocket) => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue({ id: 'r' });
+    wss.handleUpgrade.mockImplementation((_req, _sock, _head, cb) => cb(ws));
+
+    const handler = createUpgradeHandler({
+      wss,
+      registry,
+      bus: makeFakeBus(),
+      config: makeConfig(),
+    });
+    handler(
+      { url: '/ws/r', headers: {} } as unknown as http.IncomingMessage,
+      makeFakeSocket(),
+      Buffer.alloc(0),
+    );
+    const [socketHandle] = mockHandleConnection.mock.calls[0] as [
+      {
+        terminate: () => void;
+        onPong: (h: () => void) => void;
+        onClose: (h: () => void) => void;
+        onMessage: (h: (d: string) => void) => void;
+      },
+      unknown,
+    ];
+    return socketHandle;
+  };
+
+  it('handle.terminate() calls ws.terminate()', () => {
+    const ws: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const handle = drive(ws);
+    handle.terminate();
+    expect(ws.terminate).toHaveBeenCalled();
+  });
+
+  it('handle.onPong(handler) subscribes to ws "pong" events', () => {
+    const ws: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const handle = drive(ws);
+    handle.onPong(jest.fn());
+    expect(ws.on).toHaveBeenCalledWith('pong', expect.any(Function));
+  });
+
+  it('handle.onClose(handler) subscribes to ws "close" events', () => {
+    const ws: WsSocket = {
+      on: jest.fn().mockReturnThis(),
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const handle = drive(ws);
+    handle.onClose(jest.fn());
+    expect(ws.on).toHaveBeenCalledWith('close', expect.any(Function));
+  });
+
+  it('handle.onMessage handler receives a string when ws emits a Buffer', () => {
+    let captured: ((data: Buffer | string) => void) | undefined;
+    const onFn = jest.fn((event: string, listener: (data: Buffer | string) => void) => {
+      if (event === 'message') captured = listener;
+      return ws;
+    });
+    const ws: WsSocket = {
+      on: onFn as unknown as WsSocket['on'],
+      send: jest.fn(),
+      close: jest.fn(),
+      terminate: jest.fn(),
+      ping: jest.fn(),
+    };
+    const handle = drive(ws);
+    const userHandler = jest.fn();
+    handle.onMessage(userHandler);
+    captured?.(Buffer.from('hello'));
+    expect(userHandler).toHaveBeenCalledWith('hello');
+    expect(typeof userHandler.mock.calls[0][0]).toBe('string');
+  });
+});
+
+// ─── 404 exact wire bytes ─────────────────────────────────────────────────────
+
+describe('createUpgradeHandler: 404 wire bytes', () => {
+  it('writes exactly "HTTP/1.1 404 Not Found\\r\\n\\r\\n" on miss', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue(undefined);
+
+    const handler = createUpgradeHandler({
+      wss,
+      registry,
+      bus: makeFakeBus(),
+      config: makeConfig(),
+    });
+    const socket = makeFakeSocket();
+    handler(
+      { url: '/ws/missing', headers: {} } as unknown as http.IncomingMessage,
+      socket,
+      Buffer.alloc(0),
+    );
+    expect(socket.write).toHaveBeenCalledWith('HTTP/1.1 404 Not Found\r\n\r\n');
+  });
+});
+
+// ─── roomId URL parsing edges ────────────────────────────────────────────────
+
+describe('createUpgradeHandler: roomId URL parsing edges', () => {
+  it('parses roomId despite a trailing slash (/ws/abc/)', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue(undefined);
+
+    const handler = createUpgradeHandler({
+      wss,
+      registry,
+      bus: makeFakeBus(),
+      config: makeConfig(),
+    });
+    handler(
+      { url: '/ws/abc/', headers: {} } as unknown as http.IncomingMessage,
+      makeFakeSocket(),
+      Buffer.alloc(0),
+    );
+    expect(registry.getRoom).toHaveBeenCalledWith('abc');
+  });
+
+  it('strips query string when parsing roomId (/ws/abc?token=x)', () => {
+    const wss = makeFakeWss();
+    const registry = makeFakeRegistry();
+    (registry.getRoom as jest.Mock).mockReturnValue(undefined);
+
+    const handler = createUpgradeHandler({
+      wss,
+      registry,
+      bus: makeFakeBus(),
+      config: makeConfig(),
+    });
+    handler(
+      { url: '/ws/abc?token=x', headers: {} } as unknown as http.IncomingMessage,
+      makeFakeSocket(),
+      Buffer.alloc(0),
+    );
+    expect(registry.getRoom).toHaveBeenCalledWith('abc');
+  });
+});
