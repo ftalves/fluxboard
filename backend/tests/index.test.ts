@@ -304,7 +304,10 @@ describe('shutdown: sequence', () => {
     const { registerWorkers } = jest.requireMock('@/workers/register') as {
       registerWorkers: jest.Mock;
     };
-    registerWorkers.mockReturnValue([unsub1, unsub2]);
+    // mockImplementationOnce — confined to this test. mockReturnValue
+    // would persist past clearAllMocks() (only mock.calls/results are
+    // cleared, not impls / return values) and poison later tests.
+    registerWorkers.mockImplementationOnce(() => [unsub1, unsub2]);
 
     let unsubCalledBeforeBusClose = false;
     mockBusInstance.close.mockImplementation(() => {
@@ -342,6 +345,19 @@ describe('shutdown: idempotency', () => {
 // ─── Signal handlers ─────────────────────────────────────────────────────────
 
 describe('signal handlers', () => {
+  let logSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    // boot()'s onSignal logs "[server] received <sig>, shutting down" and
+    // "[server] shutdown already in progress (...)". Silence them so the
+    // expected signal-handling behavior doesn't show up as test-output noise.
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+  });
+
   it('SIGINT triggers shutdown', async () => {
     const handle = await safeBoot();
     if (!handle) return;

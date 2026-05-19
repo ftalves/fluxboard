@@ -122,16 +122,23 @@ describe('EventBus: dispatch is microtask-deferred', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('publish returns synchronously even when a subscriber will throw', () => {
+  it('publish returns synchronously even when a subscriber will throw', async () => {
     const bus = new EventBus();
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    bus.subscribe('domain.event', () => {
-      throw new Error('boom');
-    });
+    try {
+      bus.subscribe('domain.event', () => {
+        throw new Error('boom');
+      });
 
-    expect(() => bus.publish('domain.event', makeDomainEventPayload())).not.toThrow();
+      expect(() => bus.publish('domain.event', makeDomainEventPayload())).not.toThrow();
 
-    errSpy.mockRestore();
+      // Flush the queued microtask while the spy is still active, so the
+      // bus's `console.error('[bus] subscriber threw', ...)` doesn't leak
+      // into Jest's console output after `mockRestore` runs.
+      await drain();
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it('drains the handler on the next microtask', async () => {
