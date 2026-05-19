@@ -51,13 +51,15 @@ The order is significant — each step depends on the prior steps' guarantees.
 3. **Construct the room registry.** `const registry = new RoomRegistry({ bus, gracePeriodMs: config.GRACE_PERIOD_MS })`. Depends on the bus so it can publish lifecycle events.
 4. **Register workers.** `const unsubs = registerWorkers(bus)`. Workers must be subscribed before any `room.created` can be published, so this happens before the HTTP server starts accepting requests.
 5. **Build the HTTP server.** Construct an `http.Server` whose request handler delegates to `httpRoutes`. The handler closes over `{ registry, config }`.
-6. **Attach the WebSocket server.** Construct a `WebSocketServer({ noServer: true })`. Register an `upgrade` listener on the `http.Server` that:
+6. **Attach the WebSocket server.** Construct a `WebSocketServer({ noServer: true, maxPayload: config.MAX_WS_MESSAGE_BYTES })`. Register an `upgrade` listener on the `http.Server` that:
    - Parses `:roomId` from the URL path.
    - Looks it up via `registry.getRoom(id)`.
-   - On hit: completes the upgrade and hands the resulting `ws` socket to `connection.handleConnection({ socket, room, registry, bus, config })`.
-   - On miss: writes `HTTP/1.1 404 Not Found\r\n\r\n` to the raw socket and destroys it (per [`wire-protocol.md`](wire-protocol.md)).
+   - On hit: completes the upgrade, adapts the resulting `ws` socket into a [`SocketHandle`](../src/realtime/connection.ts) (the framework-agnostic seam — `send`, `close`, `terminate`, `ping`, `onMessage`, `onPong`, `onClose`), then calls `connection.handleConnection(socketHandle, { room, config: { joinTimeoutMs: config.JOIN_TIMEOUT_MS, wsHeartbeatMs: config.WS_HEARTBEAT_MS } })`. The `Room` already holds the references it needs to publish to the bus; the registry is not passed because the connection FSM never looks up other rooms.
+   - On miss: writes the exact bytes `HTTP/1.1 404 Not Found\r\n\r\n` to the raw socket and destroys it (per [`wire-protocol.md`](wire-protocol.md)).
 7. **Start listening.** `httpServer.listen(config.PORT, () => console.log('[server] listening on port', config.PORT))`.
-8. **Install shutdown handlers.** `SIGINT` and `SIGTERM` both call the shutdown sequence (see *Shutdown* below). Both signals install only after `listen` succeeds; if `listen` fails, the failure handler logs and exits with code `1`.
+8. **Install shutdown handlers.** Inside `boot()`, after `listen` succeeds, register `SIGINT` and `SIGTERM` listeners on `process` that invoke the returned `ServerHandle.shutdown()` (see *Shutdown* below). If `listen` fails, tear down workers / bus / registry via the same shutdown path and exit with code `1`; no signal listeners are installed in that case.
+
+   Signal listeners are installed by `boot()` itself, not by the module-level entry-point IIFE. This keeps the handlers tied to listen success (no signal listeners exist if the process fails to bind) and makes them observable in tests: a test can call `boot()` against fakes, then `process.emit('SIGINT', ...)` to drive the shutdown path through the same code that production uses. The module IIFE only handles the top-level error log and `process.exit` if `boot()` itself rejects.
 
 The composition is **explicit and threaded** — no module-level singletons. The bus, registry, and config are passed into every consumer that needs them. This keeps tests trivial: each test owns its own instances.
 
@@ -105,6 +107,22 @@ The `uncaughtException` / `unhandledRejection` handlers are installed once, imme
 
 ---
 
+## Framework boundary
+
+The HTTP layer uses raw `node:http` rather than Express (or any other framework), per CLAUDE.md's "avoid heavy frameworks" stance and because `POST /rooms` is the only route. The design, however, **keeps the door open** to swap in Express (or Fastify, Hono, etc.) later if we add features that benefit from a framework — e.g. authenticated users, persistent rooms, multiple HTTP routes, or middleware-style cross-cutting concerns.
+
+**Portability invariant:** route logic must not import or reference Node-specific HTTP types. Specifically:
+
+- `handleHttpRequest` (in [`httpRoutes.ts`](../src/realtime/httpRoutes.ts)) takes a plain `HttpRequest` (method, url, headers, body-as-string) and returns a plain `HttpResponse` (status, headers, body-as-string). It does not see `IncomingMessage` or `ServerResponse`.
+- `validateSeed`, `parseClientMessage`, `Room`, `RoomRegistry`, and `EventBus` are framework-agnostic by construction.
+- The body is passed as a **string**, not a pre-parsed object. This keeps JSON-parse error handling local to the route (`400 bad_json`) and is what makes the route Express-swappable: with Express, we'd use `express.text({ type: 'application/json', limit: MAX_SEED_BYTES })` rather than `express.json()`.
+
+**Node-specific code is confined to `server.ts`:** body streaming with the `MAX_SEED_BYTES` cap, response writing, and the `upgrade` event handler. A future Express adoption replaces only these pieces; nothing else changes.
+
+**WebSocket is unaffected by the HTTP framework choice.** `ws.WebSocketServer({ noServer: true })` attaches directly to the underlying `http.Server` via `upgrade`, so it sits beside the HTTP router rather than under it. Express would not own the WS path even if adopted for HTTP.
+
+---
+
 ## Invariants
 
 - **`index.ts` is the only place modules are constructed.** No other file constructs an `EventBus`, a `RoomRegistry`, or starts an `http.Server`.
@@ -112,6 +130,7 @@ The `uncaughtException` / `unhandledRejection` handlers are installed once, imme
 - **Shutdown is graceful by default and bounded by a hard timeout.** No code path can keep the process alive past `10_000` ms after a signal.
 - **Single port for HTTP and WebSocket.** One `http.Server` instance, one `listen` call. The WS server attaches via `noServer: true`.
 - **No globals.** All shared instances are explicitly passed.
+- **Route logic is framework-agnostic.** `server.ts` is the only Node-HTTP-aware file; route handlers take plain request/response objects so the layer can be swapped to Express or another framework if future requirements warrant it.
 - **Fail fast on misconfig.** Bad env vars exit before any port is bound or any side effect occurs.
 
 ---

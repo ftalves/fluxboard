@@ -14,8 +14,10 @@ When a client message `{ type: "event", event }` is received on a connection tha
 2. **Check for duplicate.** If `room.state.processedEventIds[event.id] === true`, classify as **duplicate**. Skip steps 3–5 and 7; proceed directly to step 6 (ack).
 3. **Apply.** Compute `nextState = applyEvent(room.state, event)`.
 4. **Classify and commit.**
-   - If `nextState !== room.state` — **applied**. Set `room.state = nextState`.
-   - Else — **rejected**. `applyEvent` no-op'd for a semantic reason (e.g. `ElementMoved` of an unknown id, `ArrowCreated` to a missing element). State unchanged.
+   - Compare `nextState.elements` to `room.state.elements`, and `nextState.arrows` to `room.state.arrows`.
+   - If **either** reference changed — **applied**. The event produced a visible state change.
+   - Else — **rejected**. `applyEvent` no-op'd for a semantic reason (e.g. `ElementMoved` of an unknown id, `ArrowCreated` to a missing element). The visible state (elements, arrows) is unchanged, but `processedEventIds` has the event id added.
+   - In **both** cases, set `room.state = nextState`. The commit is required even for rejections so that a retry of the same `event.id` is later detected as a *duplicate* in step 2 and not re-evaluated.
 5. **Broadcast** (only for *applied*). Send `{ type: "event", event }` to every client in the room **except the sender**. The broadcast event carries the server-stamped `timestamp` and `userId`.
 6. **Ack the sender.** Send `{ type: "ack", eventId: event.id, status }` where `status` is `"applied" | "duplicate" | "rejected"`.
 7. **Publish to bus** (only for *applied*). `bus.publish('domain.event', { roomId, event })`. *Duplicate* and *rejected* outcomes are not published.
@@ -27,10 +29,10 @@ Steps 1–6 are synchronous from the perspective of the connection's message han
 The duplicate check at step 2 is logically prior: a known-duplicate event has no semantic content to evaluate. `applyEvent` would short-circuit at its own internal idempotency check anyway, but checking at the realtime layer first avoids the wasted call and produces a cleaner classification.
 
 After step 2, `applyEvent` has only two possible outcomes:
-- `nextState !== room.state` → the event produced a state change → *applied*.
-- `nextState === room.state` → semantic rule violation → *rejected*.
+- `nextState.elements` or `nextState.arrows` is a new reference → the event produced a visible state change → *applied*.
+- Both are the same reference as before → only `processedEventIds` was extended → *rejected* (semantic rule violation).
 
-Reference equality (`nextState !== room.state`) is the cheapest "did anything happen?" check and matches the test patterns established in `applyEvent.test.ts`.
+Reference equality on `elements` and `arrows` is the cheapest "did anything visible happen?" check and matches the immutability pattern used throughout the domain layer. We cannot use reference equality on the whole `nextState` because `applyEvent` always returns a new state object (even on rejected paths, to record the event id in `processedEventIds`).
 
 `applyEvent` retains its own idempotency check by design (see [`apply-event.md`](apply-event.md)) — the domain layer is the source of truth for correctness, and any other caller (tests, future replay workers) gets the same guarantee. The realtime layer's pre-check is an optimization and a classification aid, not a replacement.
 
@@ -39,12 +41,9 @@ if (state.processedEventIds[event.id]) {
   status = 'duplicate';
 } else {
   const next = applyEvent(state, event);
-  if (next !== state) {
-    state = next;
-    status = 'applied';
-  } else {
-    status = 'rejected';
-  }
+  const applied = next.elements !== state.elements || next.arrows !== state.arrows;
+  state = next; // commit in both branches; rejected path retains the new processedEventIds entry
+  status = applied ? 'applied' : 'rejected';
 }
 ```
 
@@ -151,6 +150,32 @@ For the MVP this is sufficient. A future spec MAY add per-client send-buffer cap
 
 ---
 
+## Broadcast delivery guarantees
+
+The spec relies on transport-level delivery and explicitly omits per-event peer acknowledgement.
+
+**What the server guarantees:**
+- Within a single open WebSocket connection, broadcast events are delivered in the order they were applied. TCP and WebSocket together provide ordered, reliable in-stream delivery: a frame either arrives or the connection breaks.
+- A silently dead connection is detected within 1× to 2× `WS_HEARTBEAT_MS` via missed pongs, and the socket is terminated.
+- A reconnecting client always receives a fresh `sync` reflecting the room's current `DiagramState`.
+
+**What the server does NOT guarantee:**
+- That every peer received every broadcast. There is no per-event acknowledgement from peers. If a peer's connection silently fails between the server's `ws.send()` and the bytes reaching them, the missed event is not retransmitted; the server only learns about the failure on the next heartbeat interval.
+- That a peer can detect its own staleness without reconnecting. The protocol carries no sequence numbers and no "you missed events" signal from server to client.
+
+**What clients must do:**
+- Reconnect on socket close. The new connection's `sync` is the recovery mechanism — any events missed during a disconnect are absorbed into the snapshot.
+- Treat each `sync` payload as authoritative; discard any locally optimistic state that conflicts with it.
+
+**Why this is acceptable for MVP:**
+- Last-write-wins is the conflict model (see CLAUDE.md). There is no per-event merge math, so a missed event is fully recoverable from the server's current state.
+- Rooms are in-memory and short-lived, so the server can always serve "the current state" cheaply.
+- `processedEventIds` deduplicates client retries during reconnect.
+
+A future iteration that needs tighter delivery guarantees should consider per-room sequence numbers, client-side gap detection, and a server-initiated resync message; see *Out of Scope* below.
+
+---
+
 ## Invariants
 
 - **Exactly one `ack` per well-formed `event` message.** Three statuses, mutually exclusive, total: an event is either *applied*, *duplicate*, or *rejected*.
@@ -173,3 +198,7 @@ For the MVP this is sufficient. A future spec MAY add per-client send-buffer cap
 - Compression of broadcast payloads.
 - Application-level backpressure protocol (e.g. `pause` / `resume` from server to slow clients).
 - Replay of recent events to late joiners (the `sync` snapshot is sufficient; no event-log delivery).
+- Per-event peer acknowledgement. The only `ack` in the protocol is sender-bound; peers receive the broadcast and apply it without confirming back.
+- Per-room sequence numbers on broadcast events, and any client-side gap detection that would build on them.
+- Server-initiated resync messages ("you missed events; here is the current state"). Recovery from missed broadcasts is by client reconnect, which produces a fresh `sync`.
+- Server-side event log buffering for `replay-since-seq` semantics.

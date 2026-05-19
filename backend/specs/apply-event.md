@@ -152,6 +152,7 @@ This applies to **all** event types without exception.
 **Behavior:** Upserts the arrow into `state.arrows` keyed by `arrow.id`.
 
 - If `fromElementId` or `toElementId` does not exist in `state.elements` → silent no-op.
+- If `fromElementId === toElementId` → silent no-op. Arrows must connect two distinct elements.
 - If an arrow with the same `id` already exists, it is overwritten (last-write-wins).
 - `elements` is unchanged.
 
@@ -159,8 +160,8 @@ This applies to **all** event types without exception.
 |---|---|
 | `fromElementId` not in elements | No-op, state returned as-is |
 | `toElementId` not in elements | No-op, state returned as-is |
-| Duplicate arrow `id` (both elements exist) | Overwrites existing arrow |
-| Self-referencing arrow (`from === to`, element exists) | Accepted as-is |
+| `fromElementId === toElementId` (self-referencing) | No-op, state returned as-is |
+| Duplicate arrow `id` (both elements exist, distinct) | Overwrites existing arrow |
 
 ---
 

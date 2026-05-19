@@ -75,6 +75,9 @@ export function applyEvent(state: DiagramState, event: DiagramEvent): DiagramSta
       if (!state.elements[arrow.fromElementId] || !state.elements[arrow.toElementId]) {
         return markProcessed(state);
       }
+      if (arrow.fromElementId === arrow.toElementId) {
+        return markProcessed(state);
+      }
       return markProcessed({
         ...state,
         arrows: { ...state.arrows, [arrow.id]: arrow },

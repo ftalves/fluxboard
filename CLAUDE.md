@@ -99,9 +99,7 @@ The authoritative type definitions live in [`backend/src/domain/types.ts`](backe
 
 This project follows a **spec-driven loop**:
 1. Define a precise spec (inputs, outputs, edge cases)
-2. Write tests covering edge cases first
-3. Implement the minimal solution
-4. Refactor only after tests pass
+2. Write tests covering edge cases first (follow the test-driven-development skill)
 
 Before implementing anything: ask clarifying questions, surface edge cases, and get spec sign-off. Do not jump ahead.
 
