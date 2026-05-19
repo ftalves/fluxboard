@@ -28,7 +28,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     const n = Number(raw);
     const invalidPort = key === 'PORT' && n > 65_535;
     if (!Number.isInteger(n) || n <= 0 || invalidPort) {
-      console.error(`[config] ${key}="${raw}" must be a positive integer${key === 'PORT' ? ' ≤ 65535' : ''}`);
+      console.error(
+        `[config] ${key}="${raw}" must be a positive integer${key === 'PORT' ? ' ≤ 65535' : ''}`,
+      );
       process.exit(1);
       // unreachable — satisfies TypeScript's control-flow analysis
       return result;
