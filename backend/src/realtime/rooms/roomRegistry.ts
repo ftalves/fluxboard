@@ -31,11 +31,14 @@ export class RoomIdExhaustionError extends Error {
   }
 }
 
+const MAX_ID_ATTEMPTS = 5;
+
 export class RoomRegistry {
   private readonly bus: EventBus;
   private readonly gracePeriodMs: number;
   private readonly roomIdLength: number;
   private readonly generateId: () => string;
+  private readonly rooms: Map<string, Room> = new Map();
 
   constructor(opts: RoomRegistryOptions) {
     this.bus = opts.bus;
@@ -44,23 +47,83 @@ export class RoomRegistry {
     this.generateId = opts.generateId ?? (() => generateRoomId(this.roomIdLength));
   }
 
-  createRoom(_seed: Seed): Room {
-    throw new Error('RoomRegistry.createRoom: not yet implemented');
+  createRoom(seed: Seed): Room {
+    let id: string | undefined;
+    for (let i = 0; i < MAX_ID_ATTEMPTS; i++) {
+      const candidate = this.generateId();
+      if (!this.rooms.has(candidate)) {
+        id = candidate;
+        break;
+      }
+    }
+    if (id === undefined) throw new RoomIdExhaustionError();
+
+    const room = new Room({
+      id,
+      state: {
+        elements: seed.elements,
+        arrows: seed.arrows,
+        processedEventIds: {},
+      },
+      bus: this.bus,
+      gracePeriodMs: this.gracePeriodMs,
+      onGraceExpired: () => this.destroyRoom(id as string, 'empty'),
+    });
+    this.rooms.set(id, room);
+
+    // Publish AFTER insertion so subscribers that look up the room find it.
+    try {
+      this.bus.publish('room.created', {
+        roomId: id,
+        createdAt: room.createdAt,
+        seedElementCount: Object.keys(seed.elements).length,
+        seedArrowCount: Object.keys(seed.arrows).length,
+      });
+    } catch (err) {
+      console.error('[registry] bus.publish room.created threw', { roomId: id, err });
+    }
+
+    return room;
   }
 
-  getRoom(_id: string): Room | undefined {
-    throw new Error('RoomRegistry.getRoom: not yet implemented');
+  getRoom(id: string): Room | undefined {
+    return this.rooms.get(id);
   }
 
-  destroyRoom(_id: string, _reason: DestroyReason): void {
-    throw new Error('RoomRegistry.destroyRoom: not yet implemented');
+  destroyRoom(id: string, reason: DestroyReason): void {
+    const room = this.rooms.get(id);
+    if (!room) return;
+    // Grace race: a reconnect that arrived between the timer firing and
+    // this callback running has restored clients. Only abort on 'empty';
+    // 'shutdown' proceeds regardless.
+    if (reason === 'empty' && !room.isEmpty()) return;
+
+    try {
+      room.disconnectAll(reason);
+    } catch (err) {
+      console.error('[registry] room.disconnectAll threw', { roomId: id, err });
+    }
+
+    this.rooms.delete(id);
+
+    try {
+      this.bus.publish('room.destroyed', {
+        roomId: id,
+        destroyedAt: Date.now(),
+        reason,
+      });
+    } catch (err) {
+      console.error('[registry] bus.publish room.destroyed threw', { roomId: id, err });
+    }
   }
 
   size(): number {
-    throw new Error('RoomRegistry.size: not yet implemented');
+    return this.rooms.size;
   }
 
-  forEachRoom(_fn: (room: Room) => void): void {
-    throw new Error('RoomRegistry.forEachRoom: not yet implemented');
+  forEachRoom(fn: (room: Room) => void): void {
+    for (const room of this.rooms.values()) {
+      fn(room);
+    }
   }
 }

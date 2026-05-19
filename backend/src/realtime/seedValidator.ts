@@ -1,3 +1,4 @@
+import { Element, Arrow } from '@/domain/types';
 import { Seed } from '@/realtime/rooms/roomRegistry';
 
 export type ValidateSeedResult = { valid: true; seed: Seed } | { valid: false; detail: string };
@@ -32,6 +33,93 @@ export type ValidateSeedResult = { valid: true; seed: Seed } | { valid: false; d
  * a human-readable description of the failure. On success, returns
  * `{ valid: true, seed }` with the seed re-typed as `Seed`.
  */
-export function validateSeed(_input: unknown): ValidateSeedResult {
-  throw new Error('validateSeed: not yet implemented');
+const fail = (detail: string): ValidateSeedResult => ({ valid: false, detail });
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+
+const isFiniteNumber = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isFinite(v);
+
+function validateElement(key: string, raw: unknown): Element | string {
+  if (!isObject(raw)) return `element "${key}" must be an object`;
+  if (!isNonEmptyString(raw.id)) return `element "${key}".id must be a non-empty string`;
+  if (raw.id !== key) return `element key "${key}" does not match id "${String(raw.id)}"`;
+  if (raw.type !== 'rectangle' && raw.type !== 'circle' && raw.type !== 'text') {
+    return `element "${key}".type must be one of rectangle | circle | text`;
+  }
+  for (const f of ['x', 'y', 'width', 'height'] as const) {
+    if (!isFiniteNumber(raw[f])) {
+      return `element "${key}".${f} must be a finite number`;
+    }
+  }
+  if (raw.text !== undefined && typeof raw.text !== 'string') {
+    return `element "${key}".text must be a string when present`;
+  }
+  const el: Element = {
+    id: raw.id,
+    type: raw.type,
+    x: raw.x as number,
+    y: raw.y as number,
+    width: raw.width as number,
+    height: raw.height as number,
+  };
+  if (typeof raw.text === 'string') el.text = raw.text;
+  return el;
+}
+
+function validateArrow(
+  key: string,
+  raw: unknown,
+  elements: Record<string, Element>,
+): Arrow | string {
+  if (!isObject(raw)) return `arrow "${key}" must be an object`;
+  if (!isNonEmptyString(raw.id)) return `arrow "${key}".id must be a non-empty string`;
+  if (raw.id !== key) return `arrow key "${key}" does not match id "${String(raw.id)}"`;
+  if (!isNonEmptyString(raw.fromElementId)) {
+    return `arrow "${key}".fromElementId must be a non-empty string`;
+  }
+  if (!isNonEmptyString(raw.toElementId)) {
+    return `arrow "${key}".toElementId must be a non-empty string`;
+  }
+  if (!elements[raw.fromElementId]) {
+    return `arrow "${key}".fromElementId references unknown element "${raw.fromElementId}"`;
+  }
+  if (!elements[raw.toElementId]) {
+    return `arrow "${key}".toElementId references unknown element "${raw.toElementId}"`;
+  }
+  if (raw.fromElementId === raw.toElementId) {
+    return `arrow "${key}" connects an element to itself`;
+  }
+  return {
+    id: raw.id,
+    fromElementId: raw.fromElementId,
+    toElementId: raw.toElementId,
+  };
+}
+
+export function validateSeed(input: unknown): ValidateSeedResult {
+  if (!isObject(input)) return fail('seed must be a non-null object');
+  if (!isObject(input.elements)) return fail('seed.elements must be an object');
+  if (!isObject(input.arrows)) return fail('seed.arrows must be an object');
+
+  const elements: Record<string, Element> = {};
+  for (const key of Object.keys(input.elements)) {
+    if (key.length === 0) return fail('element keys must be non-empty strings');
+    const res = validateElement(key, input.elements[key]);
+    if (typeof res === 'string') return fail(res);
+    elements[key] = res;
+  }
+
+  const arrows: Record<string, Arrow> = {};
+  for (const key of Object.keys(input.arrows)) {
+    if (key.length === 0) return fail('arrow keys must be non-empty strings');
+    const res = validateArrow(key, input.arrows[key], elements);
+    if (typeof res === 'string') return fail(res);
+    arrows[key] = res;
+  }
+
+  return { valid: true, seed: { elements, arrows } };
 }

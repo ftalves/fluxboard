@@ -9,8 +9,8 @@ import { startLoggingWorker } from './loggingWorker';
  * Single seam for wiring workers — `index.ts` calls this exactly once
  * after constructing the bus and before starting the HTTP server.
  */
-export function registerWorkers(_bus: EventBus): Unsubscribe[] {
-  throw new Error('registerWorkers: not yet implemented');
+export function registerWorkers(bus: EventBus): Unsubscribe[] {
+  return [startLoggingWorker(bus)];
 }
 
 // Re-export so callers can construct workers directly when needed
