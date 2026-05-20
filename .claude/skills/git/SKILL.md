@@ -234,6 +234,7 @@ Report:
 
 ## General best practices (always apply)
 
+- **Use the github MCP tools (`mcp__github__*`), never the `gh` CLI**, for every GitHub-side operation: creating/reading/updating PRs, posting comments, requesting reviews, merging, managing branches via the API, listing issues. Plain `git` for local-repo work (status, diff, commit, push) is fine — the prohibition is specifically on the `gh` binary.
 - **One concern per commit.** A commit that does two unrelated things should be two commits.
 - **Never force-push to main/master.** Force-push to feature branches is acceptable when rewriting history before review.
 - **Never skip hooks** (`--no-verify`). If a hook blocks you, fix the root cause.
