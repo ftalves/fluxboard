@@ -303,8 +303,12 @@ No change beyond what `npm test` and `npm run build` already do. They run inside
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "eslint": "^9.11.0",
+    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "^0.4.12",
     "jsdom": "^25.0.0",
     "typescript": "^5.4.5",
+    "typescript-eslint": "^8.7.0",
     "vite": "^5.4.0",
     "vitest": "^2.0.0"
   }
