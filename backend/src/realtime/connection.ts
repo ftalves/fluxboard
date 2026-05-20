@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Room, ClientHandle, ConnectionId } from '@/realtime/rooms/room';
 import { ServerMessage } from '@/realtime/protocol/messages';
 import { parseClientMessage } from '@/realtime/protocol/parse';
-import { DiagramEvent } from '@/domain/types';
+import { DiagramEvent } from '@fluxboard/domain';
 
 /**
  * The realtime layer's view of a WebSocket connection.

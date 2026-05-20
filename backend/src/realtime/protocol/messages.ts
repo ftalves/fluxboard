@@ -1,4 +1,4 @@
-import { DiagramEvent, Element, Arrow } from '@/domain/types';
+import { DiagramEvent, Element, Arrow } from '@fluxboard/domain';
 
 // The public projection of DiagramState that crosses the wire.
 // `processedEventIds` is internal to the server and never sent to clients.

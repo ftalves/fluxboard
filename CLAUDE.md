@@ -95,6 +95,10 @@ The authoritative type definitions live in [`backend/src/domain/types.ts`](backe
 - **In-memory state** — no persistence requirement for MVP
 - **No authentication** — userId is a mocked string
 
+## Git & GitHub
+
+For **any** git or GitHub operation — commits, branches, pushes, PRs, reviews, comments, merges — consult [`.claude/skills/git/SKILL.md`](.claude/skills/git/SKILL.md) first and follow it. The skill is the authoritative source for branching conventions, commit message style, the tools to use (github MCP for everything on the GitHub side, not `gh`), and destructive-action policy. Do not improvise.
+
 ## Development Approach
 
 This project follows a **spec-driven loop**:

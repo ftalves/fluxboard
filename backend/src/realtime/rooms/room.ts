@@ -1,7 +1,6 @@
-import { DiagramState, DiagramEvent } from '@/domain/types';
+import { DiagramState, DiagramEvent, applyEvent } from '@fluxboard/domain';
 import { EventBus } from '@/event-bus/bus';
 import { DestroyReason, PublicState, ServerMessage } from '@/realtime/protocol/messages';
-import { applyEvent } from '@/domain/applyEvent';
 
 // `ConnectionId` is implementation-internal and never crosses the wire.
 // It uniquely identifies a single WebSocket connection within this process.

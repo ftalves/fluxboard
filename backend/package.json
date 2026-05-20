@@ -1,5 +1,5 @@
 {
-  "name": "fluxboard",
+  "name": "@fluxboard/backend",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -39,6 +39,7 @@
     "typescript": "^5.4.5"
   },
   "dependencies": {
+    "@fluxboard/domain": "*",
     "ws": "^8.20.0"
   }
 }

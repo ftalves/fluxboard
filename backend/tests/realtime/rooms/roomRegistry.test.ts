@@ -1,7 +1,7 @@
 import { RoomRegistry, RoomIdExhaustionError } from '@/realtime/rooms/roomRegistry';
 import { Room, ClientHandle } from '@/realtime/rooms/room';
 import { EventBus } from '@/event-bus/bus';
-import { Element, Arrow } from '@/domain/types';
+import { Element, Arrow } from '@fluxboard/domain';
 
 // ─── Fakes / factories ───────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-import { Element, Arrow } from '@/domain/types';
+import { Element, Arrow } from '@fluxboard/domain';
 import { Seed } from '@/realtime/rooms/roomRegistry';
 
 export type ValidateSeedResult = { valid: true; seed: Seed } | { valid: false; detail: string };

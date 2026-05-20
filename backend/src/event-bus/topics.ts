@@ -1,4 +1,4 @@
-import { DiagramEvent } from '@/domain/types';
+import { DiagramEvent } from '@fluxboard/domain';
 
 export type Topic = 'domain.event' | 'room.created' | 'room.destroyed';
 

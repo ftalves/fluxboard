@@ -1,4 +1,4 @@
-import { Element, Arrow } from '@/domain/types';
+import { Element, Arrow } from '@fluxboard/domain';
 import { EventBus } from '@/event-bus/bus';
 import { DestroyReason } from '@/realtime/protocol/messages';
 import { Room } from './room';
