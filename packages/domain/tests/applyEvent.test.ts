@@ -1,5 +1,6 @@
-import { applyEvent } from '@/domain/applyEvent';
-import { DiagramState, DiagramEvent, Element, Arrow } from '@/domain/types';
+import { describe, it, expect } from 'vitest';
+import { applyEvent } from '../src/applyEvent';
+import { DiagramState, DiagramEvent, Element, Arrow } from '../src/types';
 
 const emptyState = (): DiagramState => ({
   elements: {},

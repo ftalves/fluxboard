@@ -5,7 +5,7 @@ import type {
   RoomDestroyedPayload,
 } from '@/event-bus/topics';
 import type { Unsubscribe } from '@/event-bus/types';
-import type { DiagramEvent } from '@/domain/types';
+import type { DiagramEvent } from '@fluxboard/domain';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

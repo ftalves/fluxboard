@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 jobs:
-  test-backend:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,8 +14,9 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
-        working-directory: ./backend
-      - run: npm test
-        working-directory: ./backend
+      - run: npm test --workspace @fluxboard/domain
+      - run: npm test --workspace @fluxboard/backend
+      - run: npm test --workspace @fluxboard/frontend
+      - run: npm run build --workspace @fluxboard/frontend

@@ -1,7 +1,7 @@
 import { handleConnection, SocketHandle, ConnectionContext } from '@/realtime/connection';
 import { Room, ClientHandle } from '@/realtime/rooms/room';
 import { parseClientMessage, ParseResult } from '@/realtime/protocol/parse';
-import { DiagramEvent } from '@/domain/types';
+import { DiagramEvent } from '@fluxboard/domain';
 
 // Mock the parser so connection tests don't depend on parse.ts implementation.
 jest.mock('@/realtime/protocol/parse', () => ({

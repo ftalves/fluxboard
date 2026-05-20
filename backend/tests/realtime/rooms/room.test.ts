@@ -1,6 +1,6 @@
 import { Room, ClientHandle, RoomOptions } from '@/realtime/rooms/room';
 import { EventBus } from '@/event-bus/bus';
-import { DiagramState, DiagramEvent, Element, Arrow } from '@/domain/types';
+import { DiagramState, DiagramEvent, Element, Arrow } from '@fluxboard/domain';
 
 // ─── Fakes / factories ───────────────────────────────────────────────────────
 

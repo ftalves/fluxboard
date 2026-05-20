@@ -1,5 +1,5 @@
 import { validateSeed } from '@/realtime/seedValidator';
-import { Element, Arrow } from '@/domain/types';
+import { Element, Arrow } from '@fluxboard/domain';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

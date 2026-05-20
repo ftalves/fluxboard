@@ -1,5 +1,5 @@
 import { ClientMessage } from './messages';
-import { DiagramEvent } from '@/domain/types';
+import { DiagramEvent } from '@fluxboard/domain';
 
 /**
  * Codes the parser may emit when the input does not pass schema validation.
