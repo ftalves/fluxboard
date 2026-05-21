@@ -181,6 +181,7 @@ export function createFluxStore(): StoreApi<StoreState> {
       set((s) => {
         const nextDiagram = applyEvent(s.diagram, event);
         const nextSelection = clearSelectionIfDeleted(s.selection, nextDiagram);
+        if (nextDiagram === s.diagram && nextSelection === s.selection) return s;
         return { diagram: nextDiagram, selection: nextSelection };
       });
     },
