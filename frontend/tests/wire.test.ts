@@ -417,6 +417,17 @@ describe('connect — inbound dispatch', () => {
     warnSpy.mockRestore();
   });
 
+  test('non-string frame data is logged and ignored', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cb = baseCallbacks();
+    connect('room', 'u', cb);
+    FakeWebSocket.last().triggerOpen();
+    FakeWebSocket.last().onmessage?.({ data: new ArrayBuffer(4) });
+    expect(cb.onSync).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
   test('bad JSON is logged and ignored', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const cb = baseCallbacks();

@@ -130,11 +130,15 @@ export function connect(roomId: string, userId: string, cb: WireCallbacks): Wire
   };
 
   ws.onmessage = (ev: MessageEvent) => {
+    if (typeof ev.data !== 'string') {
+      console.warn('[wire] non-string frame data:', typeof ev.data);
+      return;
+    }
     let raw: unknown;
     try {
-      raw = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
+      raw = JSON.parse(ev.data);
     } catch {
-      console.warn('[wire] failed to parse frame:', String(ev.data).slice(0, 200));
+      console.warn('[wire] failed to parse frame:', ev.data.slice(0, 200));
       return;
     }
     if (!raw || typeof raw !== 'object') {
