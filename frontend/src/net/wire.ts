@@ -87,8 +87,16 @@ export async function createRoom(opts?: { signal?: AbortSignal }): Promise<{ roo
   }
 
   if (res.status === 201) {
-    const body = (await res.json()) as { roomId: string };
-    return { roomId: String(body.roomId) };
+    try {
+      const body = (await res.json()) as { roomId?: unknown };
+      if (body && typeof body === 'object' && typeof body.roomId === 'string') {
+        return { roomId: body.roomId };
+      }
+    } catch {
+      // fall through to create_failed below
+    }
+    const err: CreateRoomError = { kind: 'create_failed', status: 201 };
+    throw err;
   }
 
   let detail: string | undefined;
@@ -141,12 +149,21 @@ export function connect(roomId: string, userId: string, cb: WireCallbacks): Wire
 
     switch (msg.type) {
       case 'sync': {
-        if (typeof msg.roomId !== 'string' || !msg.state || typeof msg.state !== 'object') {
+        const state = msg.state as { elements?: unknown; arrows?: unknown } | undefined;
+        if (
+          typeof msg.roomId !== 'string' ||
+          !state ||
+          typeof state !== 'object' ||
+          !state.elements ||
+          typeof state.elements !== 'object' ||
+          !state.arrows ||
+          typeof state.arrows !== 'object'
+        ) {
           console.warn('[wire] invalid sync frame');
           return;
         }
         joinAcked = true;
-        cb.onSync({ roomId: msg.roomId, state: msg.state as PublicState });
+        cb.onSync({ roomId: msg.roomId, state: state as PublicState });
         for (const e of buffer) {
           try {
             ws.send(JSON.stringify({ type: 'event', event: e }));

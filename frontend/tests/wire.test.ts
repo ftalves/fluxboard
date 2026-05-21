@@ -194,6 +194,24 @@ describe('createRoom', () => {
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     expect(init.signal).toBe(controller.signal);
   });
+
+  test('201 with malformed body (json throws) yields create_failed', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      status: 201,
+      json: async () => {
+        throw new Error('bad json');
+      },
+    } as unknown as Response);
+    await expect(createRoom()).rejects.toMatchObject({ kind: 'create_failed', status: 201 });
+  });
+
+  test('201 with missing roomId yields create_failed', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      status: 201,
+      json: async () => ({}),
+    } as unknown as Response);
+    await expect(createRoom()).rejects.toMatchObject({ kind: 'create_failed', status: 201 });
+  });
 });
 
 describe('connect — open + join handshake', () => {
@@ -427,6 +445,36 @@ describe('connect — inbound dispatch', () => {
     connect('room', 'u', cb);
     FakeWebSocket.last().triggerOpen();
     FakeWebSocket.last().triggerMessage({ foo: 'bar' });
+    expect(cb.onSync).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  test('sync without state.elements is logged and ignored', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cb = baseCallbacks();
+    connect('room', 'u', cb);
+    FakeWebSocket.last().triggerOpen();
+    FakeWebSocket.last().triggerMessage({
+      type: 'sync',
+      roomId: 'r',
+      state: { arrows: {} },
+    });
+    expect(cb.onSync).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  test('sync without state.arrows is logged and ignored', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cb = baseCallbacks();
+    connect('room', 'u', cb);
+    FakeWebSocket.last().triggerOpen();
+    FakeWebSocket.last().triggerMessage({
+      type: 'sync',
+      roomId: 'r',
+      state: { elements: {} },
+    });
     expect(cb.onSync).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
