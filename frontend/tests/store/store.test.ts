@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { DiagramEvent, Element } from '@fluxboard/domain';
 
-import { USER_ID_KEY, loadOrMintUserId, resetIdentityForTests } from '../src/store/identity';
-import { createFluxStore, resetWireBridgeForTests, setWireBridge } from '../src/store/store';
+import { USER_ID_KEY, loadOrMintUserId, resetIdentityForTests } from '../../src/store/identity';
+import { createFluxStore, resetWireBridgeForTests, setWireBridge } from '../../src/store/store';
 
 const rect = (id: string, overrides: Partial<Element> = {}): Element => ({
   id,

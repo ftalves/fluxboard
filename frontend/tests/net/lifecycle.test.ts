@@ -3,11 +3,11 @@ import type { StoreApi } from 'zustand/vanilla';
 
 import type { DiagramEvent } from '@fluxboard/domain';
 
-import { backoffFor, startLifecycle } from '../src/net/lifecycle';
-import type { LifecycleHandle } from '../src/net/lifecycle';
-import { createFluxStore, resetWireBridgeForTests } from '../src/store/store';
-import type { StoreState } from '../src/store/store';
-import type { WireCallbacks, WireHandle } from '../src/net/wire';
+import { backoffFor, startLifecycle } from '../../src/net/lifecycle';
+import type { LifecycleHandle } from '../../src/net/lifecycle';
+import { createFluxStore, resetWireBridgeForTests } from '../../src/store/store';
+import type { StoreState } from '../../src/store/store';
+import type { WireCallbacks, WireHandle } from '../../src/net/wire';
 
 type FakeWire = {
   roomId: string;

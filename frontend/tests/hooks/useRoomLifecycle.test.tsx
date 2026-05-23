@@ -1,9 +1,9 @@
 import { render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { useRoomLifecycle } from '../src/hooks/useRoomLifecycle';
-import { fluxStore } from '../src/store/instance';
-import * as wireModule from '../src/net/wire';
+import { useRoomLifecycle } from '../../src/hooks/useRoomLifecycle';
+import { fluxStore } from '../../src/store/instance';
+import * as wireModule from '../../src/net/wire';
 
 type Sent = {
   roomId: string;

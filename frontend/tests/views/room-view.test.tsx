@@ -1,14 +1,14 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { RoomView } from '../src/views/RoomView';
-import { fluxStore } from '../src/store/instance';
+import { RoomView } from '../../src/views/RoomView';
+import { fluxStore } from '../../src/store/instance';
 
-vi.mock('../src/hooks/useRoomLifecycle', () => ({
+vi.mock('../../src/hooks/useRoomLifecycle', () => ({
   useRoomLifecycle: vi.fn(),
 }));
 
-import type { ConnectionStatus } from '../src/store/store';
+import type { ConnectionStatus } from '../../src/store/store';
 
 function setConn(c: ConnectionStatus): void {
   act(() => {
