@@ -40,7 +40,7 @@ export function ShapesLayer({ diagram, selection, textEditingElementId, vp }: Sh
             from={ends.from}
             to={ends.to}
             vp={vp}
-            {...(selectedArrowId === arrow.id ? { selected: true } : {})}
+            selected={selectedArrowId === arrow.id}
           />
         );
       })}

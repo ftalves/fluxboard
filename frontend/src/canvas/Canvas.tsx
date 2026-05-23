@@ -33,11 +33,11 @@ export function Canvas({ width, height, overlay }: CanvasProps) {
     <div
       data-testid="canvas-host"
       style={{ position: 'relative', width, height, overflow: 'hidden' }}
-      onMouseDown={controller.onMouseDown as never}
-      onMouseMove={controller.onMouseMove as never}
-      onMouseUp={controller.onMouseUp as never}
-      onMouseLeave={controller.onMouseLeave as never}
-      onWheel={controller.onWheel as never}
+      onMouseDown={controller.onMouseDown}
+      onMouseMove={controller.onMouseMove}
+      onMouseUp={controller.onMouseUp}
+      onMouseLeave={controller.onMouseLeave}
+      onWheel={controller.onWheel}
     >
       <Stage
         ref={stageRef}
