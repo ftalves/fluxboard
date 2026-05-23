@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
 import { useStore } from 'zustand';
@@ -95,11 +95,31 @@ export function useToolGestures({
 
   const isConnected = useCallback(() => fluxStore.getState().connection.kind === 'connected', []);
 
+  const rectRef = useRef<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    function refresh() {
+      const r = containerRef.current?.getBoundingClientRect();
+      rectRef.current = r ? { left: r.left, top: r.top } : null;
+    }
+    refresh();
+    window.addEventListener('resize', refresh);
+    window.addEventListener('scroll', refresh, true);
+    return () => {
+      window.removeEventListener('resize', refresh);
+      window.removeEventListener('scroll', refresh, true);
+    };
+  }, [containerRef]);
+
   const ptrFrom = useCallback(
     (e: unknown): PointerInfo | null => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return null;
-      return pointerFromEvent(e as never, { left: rect.left, top: rect.top }, vp);
+      let rect = rectRef.current;
+      if (!rect) {
+        const r = containerRef.current?.getBoundingClientRect();
+        if (!r) return null;
+        rect = { left: r.left, top: r.top };
+        rectRef.current = rect;
+      }
+      return pointerFromEvent(e as never, rect, vp);
     },
     [containerRef, vp],
   );

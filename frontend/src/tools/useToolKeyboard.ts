@@ -32,12 +32,16 @@ export function useToolKeyboard({ cancelGesture }: UseToolKeyboardOptions): void
       }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selection = fluxStore.getState().selection;
+        if (selection.kind === 'none') return;
         const connection = fluxStore.getState().connection;
         if (connection.kind !== 'connected') return;
-        const effects = deleteEffectsFor(fluxStore.getState().selection);
-        applyEffects(effects);
+        e.preventDefault();
+        applyEffects(deleteEffectsFor(selection));
         return;
       }
+
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       const tool = keyToTool(e.key);
       if (tool) {

@@ -37,7 +37,7 @@ export function UILayer({ selection, stageRef, vp }: UILayerProps) {
       transformer.getLayer()?.batchDraw();
       return;
     }
-    const node = stage.findOne(`#${selection.id}`);
+    const node = stage.findOne((n: Konva.Node) => n.id() === selection.id);
     transformer.nodes(node ? [node] : []);
     transformer.getLayer()?.batchDraw();
   }, [selection, stageRef]);
