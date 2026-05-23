@@ -9,14 +9,22 @@ function serializeProp(value: unknown): string {
   return String(value);
 }
 
+function isEventHandlerKey(key: string): boolean {
+  return /^on[A-Z]/.test(key);
+}
+
 function konvaStub(tag: string, role: string) {
   const Component = React.forwardRef<HTMLDivElement, AnyProps>(function KonvaStub(props, ref) {
     const { children, ...rest } = props;
-    const attrs: Record<string, string> = { 'data-konva': role };
+    const passthrough: Record<string, unknown> = { 'data-konva': role, ref };
     for (const [key, value] of Object.entries(rest)) {
-      attrs[`data-${key.toLowerCase()}`] = serializeProp(value);
+      if (typeof value === 'function' && isEventHandlerKey(key)) {
+        passthrough[key] = value;
+        continue;
+      }
+      passthrough[`data-${key.toLowerCase()}`] = serializeProp(value);
     }
-    return React.createElement(tag, { ...attrs, ref }, children as React.ReactNode);
+    return React.createElement(tag, passthrough, children as React.ReactNode);
   });
   Component.displayName = `KonvaStub(${role})`;
   return Component;

@@ -5,6 +5,8 @@ import { Canvas } from '../canvas/Canvas';
 import { useRoomLifecycle } from '../hooks/useRoomLifecycle';
 import { fluxStore } from '../store/instance';
 import type { TerminalReason } from '../store/store';
+import { Toolbar } from '../tools/Toolbar';
+import { ToolProvider } from '../tools/ToolProvider';
 import { ErrorView } from './ErrorView';
 import type { ErrorViewKind } from './ErrorView';
 
@@ -44,14 +46,19 @@ export function RoomView({ roomId }: RoomViewProps) {
     return <ErrorView kind={REASON_TO_KIND[connection.reason]} />;
   }
 
+  const disabled = connection.kind !== 'connected';
+
   return (
-    <div data-testid="room-view" data-room-id={roomId} data-connection={connection.kind}>
-      <div data-testid="room-chrome" style={{ position: 'absolute', top: 8, left: 8, zIndex: 1 }}>
-        Room: {decodeURIComponent(roomId)}
-        {connection.kind === 'connecting' && <div role="status">Connecting…</div>}
-        {connection.kind === 'reconnecting' && <div role="alert">Reconnecting…</div>}
+    <ToolProvider>
+      <div data-testid="room-view" data-room-id={roomId} data-connection={connection.kind}>
+        <div data-testid="room-chrome" style={{ position: 'absolute', top: 8, left: 8, zIndex: 1 }}>
+          Room: {decodeURIComponent(roomId)}
+          {connection.kind === 'connecting' && <div role="status">Connecting…</div>}
+          {connection.kind === 'reconnecting' && <div role="alert">Reconnecting…</div>}
+        </div>
+        <Toolbar disabled={disabled} />
+        <Canvas width={width} height={height} />
       </div>
-      <Canvas width={width} height={height} />
-    </div>
+    </ToolProvider>
   );
 }
