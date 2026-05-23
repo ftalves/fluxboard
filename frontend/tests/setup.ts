@@ -1,5 +1,7 @@
 import '@testing-library/jest-dom/vitest';
-import { afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+
+vi.mock('react-konva', () => import('./mocks/react-konva'));
 
 function makeMemoryStorage(): Storage {
   let store = new Map<string, string>();
