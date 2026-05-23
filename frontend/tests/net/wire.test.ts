@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { DiagramEvent, Element } from '@fluxboard/domain';
 
-import { backendOrigin, connect, createRoom, roomsUrl, wsOrigin, wsUrl } from '../src/net/wire';
+import { backendOrigin, connect, createRoom, roomsUrl, wsOrigin, wsUrl } from '../../src/net/wire';
 
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];

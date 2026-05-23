@@ -8,6 +8,13 @@ import { ErrorView } from '../src/views/ErrorView';
 import { HomeView } from '../src/views/HomeView';
 import { navigatePush, navigateReplace, parse, useRoute } from '../src/router';
 
+// Stub the lifecycle hook so RoomView does not open a real WebSocket
+// during routing tests. RoomView's connection-driven behavior is covered
+// in tests/room-view.test.tsx.
+vi.mock('../src/hooks/useRoomLifecycle', () => ({
+  useRoomLifecycle: vi.fn(),
+}));
+
 function setPath(path: string): void {
   window.history.replaceState(null, '', path);
 }
